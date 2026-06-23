@@ -1,0 +1,64 @@
+
+Executive Summary
+When a cube shows only its vertex-colour gradient instead of its texture under an MRT G-buffer pass, the root causes almost always lie in mismatched attribute setup or output routing. Common errors include incorrect glVertexAttribPointer size/offset (shifting UVs)
+, forgetting to enable the VAO attributes, missing sampler bindings, and improper fragment outputs. In MRT mode you must call glDrawBuffers so each layout(location=N) out maps to a color attachment
+. Without this, only the first output (or none) is written. Likewise, the texture sampler must be bound to a unit via glActiveTexture and set with glUniform1i(samplerLoc, unit)
+, or the shader samples will fail.
+
+Checklist of Likely Causes
+Attribute format errors: Each glVertexAttribPointer’s size and byte offset must match the interleaved layout (pos3,color3,norm3,tex2)
+. A size>4 or wrong offset will misalign UVs. Also call glEnableVertexAttribArray for each index.
+MRT output not routed: In deferred mode, ensure glDrawBuffers(3, attachments) is called after binding the FBO
+. Each layout(location=…) out in the frag shader then writes to the correct texture. Without it, outputs beyond location0 are discarded.
+Sampler uniform/texture unit: Bind the G-buffer textures and set samplers:
+cpp
+Copy
+glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, gPosition);
+glUniform1i(glGetUniformLocation(shader, "gPosition"), 0);
+```【13†L244-L252】 (do similarly for gNormal at unit1, gAlbedo at 2). Forgetting this leaves the texture white or black.  
+- **Texture formats:** Use high-precision formats. For example, store position/normal in `RGBA16F` textures (not `RGB8`)【6†L243-L251】, since GPUs prefer 4-component floats. Using low-precision causes visual artifacts or clamping.  
+- **FragColor vs MRT:** If not using an FBO, write your final color to a single `out vec4 FragColor`; if using MRT, remove any forward-lighting code in the cube shader. Instead the lighting pass reads from the G-buffer (e.g. `texture(gAlbedo, TexCoord)`).  
+
+## Debug Sequence  
+1. **TexCoord test:** In the cube’s frag shader, output UV as color: `FragColor = vec4(TexCoord,0,1);`. A correct UV map shows a gradient (e.g. red→blue); a solid color means the VAO setup is wrong. Fix stride/offset until it shows correctly.  
+2. **Texture bind test:** Temporarily set `FragColor = texture(diffuseSampler, TexCoord);`. If the cube is still solid-coloured, confirm `glActiveTexture(0)+glBindTexture` and `glUniform1i(diffuseSamplerLoc,0)` are done before draw.  
+3. **Enable MRT:** After geometry pass, instead of blitting, bind the default FBO and use the lighting shader. Bind gBuffer textures to units 0–2 and ensure `glDrawBuffers` was used in the geometry pass【26†L696-L704】. Then draw a screen quad with the lighting shader (which samples all G-buffer textures). The quad shader should **not** use any MVP matrix (it’s screen-space). If you used vertex colors in the geometry shader, remove those multipliers – rely solely on the G-buffer sampling.  
+4. **FBO completeness:** After setup, call `glCheckFramebufferStatus`. If incomplete, the G-buffer outputs won’t render. Ensure depth is attached and formats match (e.g. RGBA16F attachments).  
+5. **Decals/blending note:** Deferred shading cannot blen2d multiple fragments (e.g. decals) easily【37†L446-L450】. Decals typically require either a forward pass or pre-multiplication onto albedo, since the G-buffer holds only one fragment per pixel.
+
+## Example Fixes  
+- Correct VAO setup:  
+```cpp
+// stride = 11 floats
+glVertexAttribPointer(posLoc, 3, GL_FLOAT, GL_FALSE, 11*sizeof(float), (void*)(0));
+glVertexAttribPointer(normLoc,3,GL_FLOAT,GL_FALSE,11*sizeof(float),(void*)(6*sizeof(float)));
+glVertexAttribPointer(texLoc,2,GL_FLOAT,GL_FALSE,11*sizeof(float),(void*)(9*sizeof(float)));
+glEnableVertexAttribArray(posLoc);
+glEnableVertexAttribArray(normLoc);
+glEnableVertexAttribArray(texLoc);
+```【30†L812-L820】.  
+- After FBO attachments:  
+```cpp
+GLuint attachments[3]={GL_COLOR_ATTACHMENT0,GL_COLOR_ATTACHMENT1,GL_COLOR_ATTACHMENT2};
+glDrawBuffers(3, attachments); // activate MRT【26†L696-L704】
+Lighting-pass code:
+glsl
+Copy
+vec3 pos=texture(gPosition,TexCoord).xyz;
+vec3 norm=normalize(texture(gNormal,TexCoord).xyz);
+vec3 albedo=texture(gAlbedo,TexCoord).rgb;
+vec3 lightDir = normalize(lightPos - pos);
+float diff = max(dot(norm, lightDir), 0.0);
+FragColor = vec4(albedo * diff, 1.0);
+Bind textures (units 0,1,2) accordingly as shown in 
+.
+
+Symptom–Cause–Fix
+Symptom	Cause	Fix
+Cube still shows vertex-colours only	TexCoords not passed or shader ignoring texture.	Verify VAO stride/offset and enable attributes
+; ensure fragment shader uses texture() result.
+Cube goes black/white after enabling MRT	Missing glDrawBuffers or not writing FragColor.	Call glDrawBuffers(3, …)
+; write to all outputs or use FragColor for default.
+Texture looks strange/washed out	Vertex colour multiplying out texture or UV distortion.	Remove vertex-colour multiplier; test FragColor = texture(...).
+
+Next: Apply the first change (fix attribute setup) and rerun. Did the TexCoord gradient now appear?

@@ -1,0 +1,6 @@
+#include "OGL.h"
+
+MYICON ICON myPic.ico
+IDBITMAP_SMILEY BITMAP sir.bmp
+
+

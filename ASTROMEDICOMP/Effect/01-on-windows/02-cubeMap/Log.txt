@@ -1,0 +1,9 @@
+Program Started Successfully.
+STBI LOAD SUCCESS.
+STBI LOAD SUCCESS.
+STBI LOAD SUCCESS.
+STBI LOAD SUCCESS.
+STBI LOAD SUCCESS.
+STBI LOAD SUCCESS.
+initialize() Function Completed Successfully...
+Program Terminated Successfully...

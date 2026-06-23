@@ -1,0 +1,6 @@
+Step 1: Program Started Successfully.
+XOpenDisplay success
+found number of FBConfigs: 24 
+recived openGL 4.5 context successfully
+Successfully
+Log File Successfully Close
